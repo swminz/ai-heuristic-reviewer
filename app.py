@@ -303,6 +303,24 @@ if submit_btn and uploads:
     except Exception:
         data = JSON_SCHEMA  # safe fallback
 
+    # ---- Defensive parsing helpers ----
+    def _as_list(x):
+        return x if isinstance(x, list) else ([x] if isinstance(x, dict) else [])
+
+    def _parse_bbox(b):
+        if isinstance(b, list) and len(b) == 4:
+            return b
+        if isinstance(b, str):
+            try:
+                parts = [float(t) for t in b.strip().strip("[]()").split(",")]
+                return parts[:4] if len(parts) >= 4 else None
+            except Exception:
+                return None
+        return None
+
+    # Always coerce issues to a list
+    issues = _as_list(data.get("issues", []))
+
     # ===========================
     # Annotate images from bbox
     # ===========================
@@ -315,10 +333,9 @@ if submit_btn and uploads:
         # Map uploaded images for lookup
         screen_map = {sid: (fname, im.copy()) for (sid, fname, im) in local_images}
 
-        issues = data.get("issues", [])
         grouped = {}
         for iss in issues:
-            sid = iss.get("screen_id", "screen_1")
+            sid = (iss.get("screen_id") if isinstance(iss, dict) else None) or "screen_1"
             grouped.setdefault(sid, []).append(iss)
 
         # Load font if present (optional)
@@ -337,8 +354,8 @@ if submit_btn and uploads:
             draw = ImageDraw.Draw(base_img)
 
             for idx, iss in enumerate(items, start=1):
-                bbox = iss.get("bbox")
-                if bbox and isinstance(bbox, list) and len(bbox) == 4:
+                bbox = _parse_bbox(iss.get("bbox") if isinstance(iss, dict) else None)
+                if bbox:
                     x, y, bw, bh = bbox
                     x0, y0 = int(x * w), int(y * h)
                     x1, y1 = int((x + bw) * w), int((y + bh) * h)
@@ -383,19 +400,42 @@ if submit_btn and uploads:
     quick_wins = "\n".join([f"  - {t}" for t in data.get("meta", {}).get("summary", {}).get("quick_wins", [])]) or "  - (none)"
     assumptions = "\n".join([f"  - {a}" for a in data.get("assumptions", [])]) or "  - (none)"
 
-    # Findings block
+    # Findings block (robust to recommendation shapes)
     def fmt_issue(iss: dict) -> str:
-        rec = iss.get("recommendation", {}) or {}
-        ac = "\n".join([f"  - {c}" for c in rec.get("acceptance_criteria", [])]) or "  - (none)"
-        return f"""### {iss.get('id','ISS')} — {iss.get('title','(title)')} (Severity: {iss.get('severity',0)})
+        if not isinstance(iss, dict):
+            return "### (Unparsed issue)\n- Heuristic: \n- Evidence: \n- Recommendation: \n- Acceptance criteria:\n  - (none)\n"
+
+        rec = iss.get("recommendation", {})
+        action = ""
+        ac_list = []
+
+        if isinstance(rec, dict):
+            action = rec.get("action", "") or ""
+            ac_list = rec.get("acceptance_criteria", []) or []
+            if isinstance(ac_list, str):
+                ac_list = [ac_list]
+        elif isinstance(rec, list):
+            ac_list = rec
+        elif isinstance(rec, str):
+            action = rec
+
+        ac = "\n".join([f"  - {c}" for c in ac_list]) or "  - (none)"
+
+        sev = iss.get("severity", 0)
+        try:
+            sev = int(sev)
+        except Exception:
+            sev = 0
+
+        return f"""### {iss.get('id','ISS')} — {iss.get('title','(title)')} (Severity: {sev})
 - Heuristic: {iss.get('heuristic','')}
 - Evidence: {iss.get('evidence','')}
-- Recommendation: {rec.get('action','')}
+- Recommendation: {action}
 - Acceptance criteria:
 {ac}
 """
 
-    findings_md = "\n".join([fmt_issue(i) for i in data.get("issues", [])]) or "(No issues parsed)"
+    findings_md = "\n".join([fmt_issue(i) for i in issues]) or "(No issues parsed)"
     impact_effort_md = ", ".join([f"{ie.get('issue_id')} [{ie.get('impact')}/{ie.get('effort')}]" for ie in data.get("impact_effort", [])]) or "(n/a)"
 
     final_report = REPORT_TEMPLATE_MD.format(
