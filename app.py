@@ -22,11 +22,9 @@ if not OPENAI_API_KEY:
     st.error("❌ OPENAI_API_KEY is missing. Add it in Streamlit → Advanced settings → Secrets.")
     st.stop()
 
-# Expose the key as an environment variable so the OpenAI SDK can pick it up automatically
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-
+# Create OpenAI client explicitly with the key (works across SDK versions)
 from openai import OpenAI
-client = OpenAI()  # No need to pass the key explicitly
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 st.set_page_config(page_title="AI Heuristic Reviewer", page_icon="🕵️‍♀️", layout="wide")
 
