@@ -4,5 +4,4 @@ openai==1.51.0
 httpx==0.27.2
 httpcore==1.0.5
 python-dotenv==1.0.1
-markdown2==2.4.12
-matplotlib==3.9.2        # NEW: for charts
+matplotlib==3.9.2
