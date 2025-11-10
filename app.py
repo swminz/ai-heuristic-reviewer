@@ -3,6 +3,8 @@ import io
 import json
 import zipfile
 import datetime as dt
+import base64
+import matplotlib.pyplot as plt   # for charts
 
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
