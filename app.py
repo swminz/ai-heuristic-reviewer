@@ -14,7 +14,9 @@ import matplotlib.pyplot as plt
 
 load_dotenv()
 
-# ------------------ helpers ------------------
+# ===============================
+# Helpers
+# ===============================
 def _to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -25,8 +27,11 @@ def chart_scores(heuristics_dict: dict) -> bytes:
     values = [heuristics_dict.get(h, 0) for h in labels]
     plt.figure()
     plt.bar(labels, values)
-    plt.ylim(0,3); plt.title("Heuristic Scores (0–3)")
-    buf = io.BytesIO(); plt.savefig(buf, format="png", bbox_inches="tight"); plt.close()
+    plt.ylim(0,3)
+    plt.title("Heuristic Scores (0–3)")
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    plt.close()
     return buf.getvalue()
 
 def chart_impact_effort(rows: list) -> bytes:
@@ -39,21 +44,27 @@ def chart_impact_effort(rows: list) -> bytes:
         ids.append(r.get("issue_id",""))
     plt.figure()
     plt.scatter(xs, ys)
-    for x,y,i in zip(xs,ys,ids): plt.text(x+0.03,y+0.03,i)
-    plt.xticks([1,2,3],["Low","Med","High"]); plt.yticks([1,2,3],["Low","Med","High"])
-    plt.xlabel("Effort"); plt.ylabel("Impact"); plt.title("Impact vs Effort")
-    buf = io.BytesIO(); plt.savefig(buf, format="png", bbox_inches="tight"); plt.close()
+    for x,y,i in zip(xs,ys,ids):
+        plt.text(x+0.03, y+0.03, i)
+    plt.xticks([1,2,3], ["Low","Med","High"])
+    plt.yticks([1,2,3], ["Low","Med","High"])
+    plt.xlabel("Effort"); plt.ylabel("Impact")
+    plt.title("Impact vs Effort")
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    plt.close()
     return buf.getvalue()
 
 def _as_list(x):
     if x is None: return []
     if isinstance(x, list): return x
-    if isinstance(x, (dict,)): return [x]
+    if isinstance(x, dict): return [x]
     if isinstance(x, str): return [x]
     return []
 
 def _parse_bbox(b):
-    if isinstance(b, list) and len(b) >= 4: return b[:4]
+    if isinstance(b, list) and len(b) >= 4:
+        return b[:4]
     if isinstance(b, str):
         try:
             parts = [float(t) for t in b.strip().strip("[]()").split(",")]
@@ -61,12 +72,12 @@ def _parse_bbox(b):
         except Exception:
             return None
     return None
+
 def _strip_code_fences(s: str) -> str:
     """Remove ```json ... ``` fences if the model adds them."""
     if not isinstance(s, str):
         return s
     s = s.strip()
-    # remove leading ```json or ``` and trailing ```
     if s.startswith("```"):
         lines = s.splitlines()
         if lines and lines[0].startswith("```"):
@@ -76,7 +87,9 @@ def _strip_code_fences(s: str) -> str:
         s = "\n".join(lines).strip()
     return s
 
-# ------------------ config ------------------
+# ===============================
+# CONFIG (OpenAI SDK v1+)
+# ===============================
 st.set_page_config(page_title="AI Heuristic Reviewer", page_icon="🕵️‍♀️", layout="wide")
 
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -91,7 +104,9 @@ client_kwargs = {"api_key": OPENAI_API_KEY}
 if ORG: client_kwargs["organization"] = ORG
 client = OpenAI(**client_kwargs)
 
-# ------------------ rubric & templates ------------------
+# ===============================
+# Rubric & Templates
+# ===============================
 HEURISTIC_RUBRIC = r"""
 Core Heuristics (0–3):
 1. Visibility of system status
@@ -163,7 +178,7 @@ Return **JSON only** that matches this Python-esque schema (keys and types), no 
   "meta": {{
     "title": "Heuristic Review — <screen/product>",
     "date": "<YYYY-MM-DD>",
-    "screens": [{{"id": "screen_1", "filename": "<name>", "resolution": [W,H]}}...],
+    "screens": [{{"id": "screen_1", "filename": "<name>", "resolution": [W,H]}}],
     "summary": {{
       "top_issues": [str],          # 3–6 concise bullets
       "quick_wins": [str]           # 3–5 concise bullets
@@ -182,9 +197,9 @@ Return **JSON only** that matches this Python-esque schema (keys and types), no 
       "heuristic": "H<n> <name>",
       "severity": int,              # 1..3 where 3 is Major
       "evidence": str,              # refer to element and behavior
-      "bbox": [x,y,w,h],            # normalized 0..1 floats, 4 numbers
+      "bbox": [x,y,w,h],            # normalized 0..1 floats
       "recommendation": {{
-        "action": str,              # action verb + directive
+        "action": str,
         "rationale": str,
         "acceptance_criteria": [str]
       }}
@@ -203,7 +218,9 @@ RUBRIC:
 {HEURISTIC_RUBRIC}
 """
 
-# ------------------ UI ------------------
+# ===============================
+# UI
+# ===============================
 st.title("🕵️‍♀️ AI Heuristic Reviewer")
 st.caption("Upload 1–5 screenshots. Get a professional heuristic review with annotated callouts, charts, and an impact/effort list.")
 
@@ -217,60 +234,63 @@ uploads = st.file_uploader("Upload 1–5 screenshots (PNG/JPG)", type=["png","jp
 
 if uploads:
     st.subheader("Previews")
-    for i,f in enumerate(uploads, start=1):
+    for i, f in enumerate(uploads, start=1):
         img = Image.open(f).convert("RGB")
         st.image(img, caption=f"Screen {i}: {f.name}", use_column_width=True)
 
-# ------------------ main ------------------
+# ===============================
+# Main
+# ===============================
 if submit_btn and uploads:
     today = dt.date.today().isoformat()
     local_images = []
-    json_inputs = [{"type":"text","text": f"Overall context: {context or '(none)'} | Date: {today}"}]
 
-    # pack images and per-screen meta
+    # Build JSON inputs (context + per-screen text + image_url)
+    json_inputs = [
+        {"type": "text", "text": f"Overall context: {context or '(none)'} | Date: {today}"}
+    ]
+
     for i, f in enumerate(uploads, start=1):
-        f.seek(0); b = f.read()
+        f.seek(0)
+        b = f.read()
         img = Image.open(io.BytesIO(b)).convert("RGB")
-        w,h = img.size
+        w, h = img.size
         sid = f"screen_{i}"
+
+        # keep for annotation later
         local_images.append((sid, f.name, img, w, h))
-        json_inputs.append({"type":"text","text": f"{sid}: {f.name}, resolution {w}x{h}"})
-        json_inputs.append({"type":"image_url","image_url":{"url":"data:image/png;base64,"+_to_base64(img)}})
+
+        # add per-screen prompt and image
+        json_inputs.append({"type": "text", "text": f"{sid}: {f.name}, resolution {w}x{h}"})
+        json_inputs.append({
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64," + _to_base64(img)}
+        })
 
     # --------- 1) JSON call (required) ----------
-    # --------- 1) JSON call (required) ----------
-with st.spinner("Analyzing with OpenAI (JSON)…"):
-    try:
-        resp = client.chat.completions.create(
-            model=model_choice,                     # use gpt-4o for best results
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_JSON},
-                {"role": "user", "content": json_inputs}
-            ],
-            temperature=0.1,
-            max_tokens=4000,
-            # NEW: force the model to output only JSON
-            response_format={"type": "json_object"},
-        )
-        raw_json = resp.choices[0].message.content or ""
-        raw_json = _strip_code_fences(raw_json)     # NEW: clean any ```json fences
-    except Exception as e:
-        msg = str(e)
-        if "insufficient_quota" in msg or "Error code: 429" in msg:
-            st.error("Your API key has **no available quota**. Add billing/credits at platform.openai.com → Billing, then try again.")
-        else:
-            st.error(f"OpenAI error: {e}")
-        st.stop()
+    with st.spinner("Analyzing with OpenAI (JSON)…"):
+        try:
+            resp = client.chat.completions.create(
+                model=model_choice,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT_JSON},
+                    {"role": "user", "content": json_inputs}
+                ],
+                temperature=0.1,
+                max_tokens=4000,
+                response_format={"type": "json_object"},   # force strict JSON
+            )
+            raw_json = resp.choices[0].message.content or ""
+            raw_json = _strip_code_fences(raw_json)
+        except Exception as e:
+            msg = str(e)
+            if "insufficient_quota" in msg or "Error code: 429" in msg:
+                st.error("Your API key has **no available quota**. Add billing/credits at platform.openai.com → Billing, then try again.")
+            else:
+                st.error(f"OpenAI error: {e}")
+            st.stop()
 
-# try to parse JSON strictly
-try:
-    data = json.loads(raw_json)
-except Exception:
-    st.error("The model did not return valid JSON. Showing the raw response for debugging below.")
-    st.code(raw_json)
-    st.stop()
-
-    # try to parse JSON strictly
+    # Parse JSON strictly
     try:
         data = json.loads(raw_json)
     except Exception:
@@ -278,23 +298,22 @@ except Exception:
         st.code(raw_json)
         st.stop()
 
-    # ---- normalize ----
+    # Normalize
     meta = data.get("meta", {}) or {}
-    issues = _as_list(data.get("issues"))
-    impact_effort = _as_list(data.get("impact_effort"))
     summary = meta.get("summary", {}) or {}
     scores = meta.get("scores", {}) or {}
     H = scores.get("heuristics", {}) if isinstance(scores, dict) else {}
+    issues = _as_list(data.get("issues"))
+    impact_effort = _as_list(data.get("impact_effort"))
 
     if len(issues) < 3:
-        st.warning("The model returned very few findings. Try uploading one more screen or zooming to full-page views for better signal.")
+        st.warning("The model returned very few findings. Try uploading one more full-page screen for more signal.")
 
-    # -------- annotate images --------
+    # -------- Annotate images --------
     annotated_images_md = []
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer,'w',zipfile.ZIP_DEFLATED) as zf:
-        # Map images
-        screen_map = {sid:(fname, im.copy(), w, h) for (sid,fname,im,w,h) in local_images}
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        screen_map = {sid: (fname, im.copy(), w, h) for (sid, fname, im, w, h) in local_images}
         grouped = {}
         for iss in issues:
             if isinstance(iss, dict):
@@ -315,35 +334,36 @@ except Exception:
             for idx, iss in enumerate(items, start=1):
                 bbox = _parse_bbox(iss.get("bbox"))
                 if bbox:
-                    x,y,bw,bh = bbox
-                    x0,y0 = int(x*w), int(y*h)
-                    x1,y1 = int((x+bw)*w), int((y+bh)*h)
-                    draw.rectangle([x0,y0,x1,y1], outline=(255,0,0), width=3)
-                    tx,ty = x0, max(0, y0-24)
-                    draw.rectangle([tx,ty,tx+24,ty+24], fill=(255,0,0))
-                    draw.text((tx+7,ty+4), f"{idx}", fill=(255,255,255), font=font)
+                    x, y, bw, bh = bbox
+                    x0, y0 = int(x*w), int(y*h)
+                    x1, y1 = int((x+bw)*w), int((y+bh)*h)
+                    draw.rectangle([x0, y0, x1, y1], outline=(255,0,0), width=3)
+                    tx, ty = x0, max(0, y0-24)
+                    draw.rectangle([tx, ty, tx+24, ty+24], fill=(255,0,0))
+                    draw.text((tx+7, ty+4), f"{idx}", fill=(255,255,255), font=font)
 
-            buf = io.BytesIO(); base_img.save(buf, format="PNG")
+            buf = io.BytesIO()
+            base_img.save(buf, format="PNG")
             zf.writestr(f"images/{sid}_annotated.png", buf.getvalue())
             annotated_images_md.append(f"![{sid} annotated](images/{sid}_annotated.png)")
 
         # Originals
-        for i,(sid,fname,im,_,_) in enumerate(local_images, start=1):
+        for i, (sid, fname, im, _, _) in enumerate(local_images, start=1):
             buf = io.BytesIO(); im.save(buf, format="PNG")
             zf.writestr(f"images/original_{i}_{fname}", buf.getvalue())
 
-    # -------- charts --------
+    # -------- Charts --------
     try:
         scores_png = chart_scores(H or {})
         ie_png = chart_impact_effort(impact_effort)
-        with zipfile.ZipFile(zip_buffer,'a',zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("charts/heuristics.png", scores_png)
             zf.writestr("charts/impact_effort.png", ie_png)
         charts_md = "![Heuristic scores](charts/heuristics.png)\n\n![Impact vs Effort](charts/impact_effort.png)"
     except Exception:
         charts_md = "(charts unavailable)"
 
-    # -------- summary & findings --------
+    # -------- Summary & Findings --------
     def _bullets(x):
         items = _as_list(x)
         return "\n".join([f"  - {i}" for i in items]) or "  - (none)"
@@ -395,7 +415,7 @@ except Exception:
     st.subheader("Report Preview")
     st.markdown(final_report)
 
-    with zipfile.ZipFile(zip_buffer,'a',zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("report/report_compiled.md", final_report)
         zf.writestr("report/data.json", json.dumps(data, indent=2))
 
