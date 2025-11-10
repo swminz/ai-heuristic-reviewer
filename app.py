@@ -13,6 +13,10 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()
+def _to_base64(img):
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 # ===============================
 # CONFIG (new OpenAI SDK v1+ only)
