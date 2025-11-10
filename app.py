@@ -29,7 +29,7 @@ def chart_scores(heuristics_dict: dict) -> bytes:
     labels = ["H1","H2","H3","H4","H5","H6","H7","H8","H9","H10"]
     values = [heuristics_dict.get(h, 0) for h in labels]
     plt.figure()
-    plt.bar(labels, values)            # do not set explicit colors (keeps it simple and neutral)
+    plt.bar(labels, values)            # keep default colors/style
     plt.ylim(0, 3)
     plt.title("Heuristic Scores (0–3)")
     buf = io.BytesIO()
@@ -61,24 +61,24 @@ def chart_impact_effort(impact_effort_rows: list) -> bytes:
 # ===============================
 # CONFIG (OpenAI SDK v1+)
 # ===============================
+st.set_page_config(page_title="AI Heuristic Reviewer", page_icon="🕵️‍♀️", layout="wide")
+
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 MODEL = st.secrets.get("OPENAI_VISION_MODEL") or os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+ORG = st.secrets.get("OPENAI_ORG")
 
 if not OPENAI_API_KEY:
     st.error("❌ OPENAI_API_KEY is missing. Add it in Streamlit → Advanced settings → Secrets.")
     st.stop()
 
-# Optional: organization support (if you added OPENAI_ORG in Secrets)
-ORG = st.secrets.get("OPENAI_ORG")
 client_kwargs = {"api_key": OPENAI_API_KEY}
 if ORG:
     client_kwargs["organization"] = ORG
 client = OpenAI(**client_kwargs)
 
 # ===============================
-# App UI
+# UI Header
 # ===============================
-st.set_page_config(page_title="AI Heuristic Reviewer", page_icon="🕵️‍♀️", layout="wide")
 st.title("🕵️‍♀️ AI Heuristic Reviewer")
 st.caption("Upload 1–5 screenshots. Get a professional heuristic review with annotated callouts, charts, and an impact/effort list.")
 
@@ -236,7 +236,7 @@ if submit_btn and uploads:
 
     # Keep local images for annotation later
     local_images = []
-    # vision message content: context + images + task instruction
+    # Build Vision message as text + image_url (base64 data URLs)
     vision_inputs = [{"type": "text", "text": f"Context: {context}\nDate: {today}"}]
 
     for i, f in enumerate(uploads, start=1):
@@ -245,9 +245,10 @@ if submit_btn and uploads:
         img = Image.open(io.BytesIO(bytes_data)).convert("RGB")
         local_images.append((f"screen_{i}", f.name, img))
         vision_inputs.append({
-            "type": "input_image",
-            "image_data": _to_base64(img),
-            "mime_type": "image/png"
+            "type": "image_url",
+            "image_url": {
+                "url": "data:image/png;base64," + _to_base64(img)
+            }
         })
 
     user_text = (
