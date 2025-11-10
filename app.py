@@ -3,19 +3,18 @@ import io
 import json
 import zipfile
 import datetime as dt
-from typing import List, Tuple
 
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 from markdown2 import markdown
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
 # ===============================
-# CONFIG: keys, model, client
+# CONFIG (new OpenAI SDK v1+ only)
 # ===============================
-# Read from Streamlit Secrets first, then env vars (local dev)
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 MODEL = st.secrets.get("OPENAI_VISION_MODEL") or os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
 
@@ -23,27 +22,16 @@ if not OPENAI_API_KEY:
     st.error("❌ OPENAI_API_KEY is missing. Add it in Streamlit → Advanced settings → Secrets.")
     st.stop()
 
-# Create OpenAI client explicitly with the key
-# (This avoids environment edge cases on Streamlit.)
-try:
-    from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    USE_SDK_V1 = True  # modern client
-except Exception:
-    # Compatibility fallback (older SDKs)
-    import openai as openai_legacy
-    openai_legacy.api_key = OPENAI_API_KEY
-    client = None
-    USE_SDK_V1 = False  # legacy client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ===============================
-# STREAMLIT APP SETUP
+# APP UI
 # ===============================
 st.set_page_config(page_title="AI Heuristic Reviewer", page_icon="🕵️‍♀️", layout="wide")
 st.title("🕵️‍♀️ AI Heuristic Reviewer")
-st.caption("Upload 1–5 screenshots. Get a professional heuristic review with annotated callouts, scorecard, and an impact/effort list.")
+st.caption("Upload 1–5 screenshots. Get a professional heuristic review with annotated callouts, a scorecard, and an impact/effort list.")
 
-# ---------- Helper content: Rubric & Template ----------
+# ---------- Heuristic rubric & report template ----------
 HEURISTIC_RUBRIC = r"""
 Core Heuristics (score 0–3):
 1. Visibility of system status
@@ -67,9 +55,7 @@ JSON_SCHEMA = {
     "meta": {
         "title": "Heuristic Review — <screen/product>",
         "date": "<YYYY-MM-DD>",
-        "screens": [
-            {"id": "screen_1", "filename": "upload_1.png", "resolution": [1280, 720]}
-        ],
+        "screens": [{"id": "screen_1", "filename": "upload_1.png", "resolution": [1280, 720]}],
         "summary": {"top_issues": [], "quick_wins": []},
         "scores": {
             "heuristics": {"H1": 0, "H2": 0, "H3": 0, "H4": 0, "H5": 0, "H6": 0, "H7": 0, "H8": 0, "H9": 0, "H10": 0},
@@ -151,7 +137,7 @@ SCHEMA KEYS (for guidance; do not print literally): {list(JSON_SCHEMA.keys())}
 """
 
 # ===============================
-# UI
+# SIDEBAR & UPLOAD
 # ===============================
 with st.sidebar:
     owner = st.text_input("Your name (for report)", value="Swati Minz")
@@ -177,12 +163,12 @@ if uploads:
             st.image(img, caption=f"Screen {i}: {f.name}", use_column_width=True)
 
 # ===============================
-# Main action
+# MAIN ACTION
 # ===============================
 if submit_btn and uploads:
     today = dt.date.today().isoformat()
 
-    # Build a text description of each screen (fallback; vision attach upgrade can come later)
+    # Build a text description of each screen (simple starter; you can upgrade to actual image inputs later)
     content_parts = [{"type": "text", "text": f"Context: {context}\nDate: {today}"}]
     local_images = []  # keep for annotation later
 
@@ -204,30 +190,16 @@ if submit_btn and uploads:
                 "Return JSON and Markdown separated by delimiters."
             )
 
-            if USE_SDK_V1:
-                # Modern SDK call
-                resp = client.chat.completions.create(
-                    model=MODEL,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": content_parts + [{"type": "text", "text": user_text}]}
-                    ],
-                    temperature=0.2,
-                )
-                raw = resp.choices[0].message.content
-            else:
-                # Legacy fallback
-                import openai as openai_legacy
-                messages = [
+            # New SDK v1+ call only
+            resp = client.chat.completions.create(
+                model=MODEL,
+                messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Context: {context}\nDate: {today}"},
-                    {"role": "user", "content": "Screens are uploaded by the user; analyze as described."},
-                    {"role": "user", "content": user_text},
-                ]
-                legacy_resp = openai_legacy.ChatCompletion.create(
-                    model=MODEL, messages=messages, temperature=0.2
-                )
-                raw = legacy_resp["choices"][0]["message"]["content"]
+                    {"role": "user", "content": content_parts + [{"type": "text", "text": user_text}]}
+                ],
+                temperature=0.2,
+            )
+            raw = resp.choices[0].message.content
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
@@ -265,7 +237,7 @@ if submit_btn and uploads:
             # Save model's raw report too
             zf.writestr("report/report_raw.md", report_md)
 
-            # Build a dict from uploaded images for easy lookup
+            # Map uploaded images
             screen_map = {sid: (fname, im.copy()) for (sid, fname, im) in local_images}
 
             issues = data.get("issues", [])
@@ -274,7 +246,7 @@ if submit_btn and uploads:
                 sid = iss.get("screen_id", "screen_1")
                 grouped.setdefault(sid, []).append(iss)
 
-            # Load a font if available (optional)
+            # Optional font
             font = None
             try:
                 font = ImageFont.truetype("arial.ttf", 20)
@@ -301,13 +273,12 @@ if submit_btn and uploads:
                         draw.rectangle([tx, ty, tx + 24, ty + 24], fill=(255, 0, 0))
                         draw.text((tx + 7, ty + 4), label, fill=(255, 255, 255), font=font)
 
-                # Save annotated
                 buf = io.BytesIO()
                 base_img.save(buf, format="PNG")
                 zf.writestr(f"images/{sid}_annotated.png", buf.getvalue())
                 annotated_images_md.append(f"![{sid} annotated](images/{sid}_annotated.png)")
 
-            # Also include originals
+            # Include originals
             for i, (sid, fname, im) in enumerate(local_images, start=1):
                 buf = io.BytesIO()
                 im.save(buf, format="PNG")
@@ -316,7 +287,7 @@ if submit_btn and uploads:
         # ===========================
         # Build final Markdown report
         # ===========================
-        scores = data.get("meta", {}).get("scores", {})
+        scores = data.get("meta", {}).get("scores", {}) or {}
         H = scores.get("heuristics", {}) if isinstance(scores, dict) else {}
 
         top_issues = "\n".join([f"  - {t}" for t in data.get("meta", {}).get("summary", {}).get("top_issues", [])]) or "  - (none)"
@@ -355,7 +326,6 @@ if submit_btn and uploads:
         st.subheader("Report Preview")
         st.markdown(final_report)
 
-        # Append compiled report to the ZIP and offer download
         with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("report/report_compiled.md", final_report)
 
