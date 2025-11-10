@@ -61,6 +61,20 @@ def _parse_bbox(b):
         except Exception:
             return None
     return None
+def _strip_code_fences(s: str) -> str:
+    """Remove ```json ... ``` fences if the model adds them."""
+    if not isinstance(s, str):
+        return s
+    s = s.strip()
+    # remove leading ```json or ``` and trailing ```
+    if s.startswith("```"):
+        lines = s.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        s = "\n".join(lines).strip()
+    return s
 
 # ------------------ config ------------------
 st.set_page_config(page_title="AI Heuristic Reviewer", page_icon="🕵️‍♀️", layout="wide")
@@ -224,25 +238,37 @@ if submit_btn and uploads:
         json_inputs.append({"type":"image_url","image_url":{"url":"data:image/png;base64,"+_to_base64(img)}})
 
     # --------- 1) JSON call (required) ----------
-    with st.spinner("Analyzing with OpenAI (JSON)…"):
-        try:
-            resp = client.chat.completions.create(
-                model=model_choice,
-                messages=[
-                    {"role":"system","content": SYSTEM_PROMPT_JSON},
-                    {"role":"user","content": json_inputs}
-                ],
-                temperature=0.1,
-                max_tokens=4000,
-            )
-            raw_json = resp.choices[0].message.content or ""
-        except Exception as e:
-            msg = str(e)
-            if "insufficient_quota" in msg or "Error code: 429" in msg:
-                st.error("Your API key has **no available quota**. Add billing/credits at platform.openai.com → Billing, then try again.")
-            else:
-                st.error(f"OpenAI error: {e}")
-            st.stop()
+    # --------- 1) JSON call (required) ----------
+with st.spinner("Analyzing with OpenAI (JSON)…"):
+    try:
+        resp = client.chat.completions.create(
+            model=model_choice,                     # use gpt-4o for best results
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_JSON},
+                {"role": "user", "content": json_inputs}
+            ],
+            temperature=0.1,
+            max_tokens=4000,
+            # NEW: force the model to output only JSON
+            response_format={"type": "json_object"},
+        )
+        raw_json = resp.choices[0].message.content or ""
+        raw_json = _strip_code_fences(raw_json)     # NEW: clean any ```json fences
+    except Exception as e:
+        msg = str(e)
+        if "insufficient_quota" in msg or "Error code: 429" in msg:
+            st.error("Your API key has **no available quota**. Add billing/credits at platform.openai.com → Billing, then try again.")
+        else:
+            st.error(f"OpenAI error: {e}")
+        st.stop()
+
+# try to parse JSON strictly
+try:
+    data = json.loads(raw_json)
+except Exception:
+    st.error("The model did not return valid JSON. Showing the raw response for debugging below.")
+    st.code(raw_json)
+    st.stop()
 
     # try to parse JSON strictly
     try:
