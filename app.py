@@ -14,13 +14,19 @@ from openai import OpenAI
 load_dotenv()
 
 # ---------- CONFIG ----------
-MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Read from Streamlit secrets first, then fall back to environment variables
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+MODEL = st.secrets.get("OPENAI_VISION_MODEL") or os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
 
 if not OPENAI_API_KEY:
-    st.warning("OPENAI_API_KEY is not set. Go to Streamlit Cloud > Deployment > Secrets and add it.")
+    st.error("❌ OPENAI_API_KEY is missing. Add it in Streamlit → Advanced settings → Secrets.")
+    st.stop()
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Expose the key as an environment variable so the OpenAI SDK can pick it up automatically
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+
+from openai import OpenAI
+client = OpenAI()  # No need to pass the key explicitly
 
 st.set_page_config(page_title="AI Heuristic Reviewer", page_icon="🕵️‍♀️", layout="wide")
 
