@@ -195,17 +195,27 @@ if submit_btn and uploads:
                 "Prepare heuristic review using the rubric. Screens described above. "
                 "Return JSON and Markdown separated by delimiters."
             )
+            
+            # Build a Vision message: text + real image pixels
+vision_inputs = [{"type": "text", "text": f"Context: {context}\nDate: {today}"}]
+for _, _, im in local_images:
+    vision_inputs.append({
+        "type": "input_image",
+        "image_data": _to_base64(im),
+        "mime_type": "image/png"
+    })
+vision_inputs.append({"type": "text", "text": user_text})
 
-            # New SDK v1+ call only
-            resp = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": content_parts + [{"type": "text", "text": user_text}]}
-                ],
-                temperature=0.2,
-            )
-            raw = resp.choices[0].message.content
+resp = client.chat.completions.create(
+    model=MODEL,
+    messages=[
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": vision_inputs}
+    ],
+    temperature=0.2,
+)
+raw = resp.choices[0].message.content
+
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
